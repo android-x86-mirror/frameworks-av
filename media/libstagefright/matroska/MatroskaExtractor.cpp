@@ -1088,6 +1088,10 @@ int MatroskaExtractor::addTracks() {
                     mSeekPreRollNs = track->GetSeekPreRoll();
                 } else if (!strcmp("A_MPEG/L3", codecID)) {
                     meta->setCString(kKeyMIMEType, MEDIA_MIMETYPE_AUDIO_MPEG);
+                } else if (!strcmp("A_AC3", codecID)) {
+                    meta->setCString(kKeyMIMEType, MEDIA_MIMETYPE_AUDIO_AC3);
+                } else if (!strcmp("A_DTS", codecID)) {
+                    meta->setCString(kKeyMIMEType, MEDIA_MIMETYPE_AUDIO_DTS);
                 } else {
                     ALOGW("%s is not supported.", codecID);
                     continue;
