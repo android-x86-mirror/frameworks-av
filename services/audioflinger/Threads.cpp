@@ -644,6 +644,7 @@ AudioFlinger::ThreadBase::ThreadBase(const sp<AudioFlinger>& audioFlinger, audio
         mNotifiedBatteryStart(false)
 {
     memset(&mPatch, 0, sizeof(struct audio_patch));
+    mIsDirectPcm = false;
 }
 
 AudioFlinger::ThreadBase::~ThreadBase()
@@ -1282,7 +1283,8 @@ sp<AudioFlinger::EffectHandle> AudioFlinger::ThreadBase::createEffect_l(
 
     // Reject any effect on Direct output threads for now, since the format of
     // mSinkBuffer is not guaranteed to be compatible with effect processing (PCM 16 stereo).
-    if (mType == DIRECT) {
+    // Exception: allow effects for Direct PCM
+    if (mType == DIRECT && !mIsDirectPcm) {
         ALOGW("createEffect_l() Cannot add effect %s on Direct output type thread %s",
                 desc->name, mThreadName);
         lStatus = BAD_VALUE;
@@ -1299,12 +1301,17 @@ sp<AudioFlinger::EffectHandle> AudioFlinger::ThreadBase::createEffect_l(
     }
 
     // Allow global effects only on offloaded and mixer threads
+    // Exception: allow effects for Direct PCM
     if (sessionId == AUDIO_SESSION_OUTPUT_MIX) {
         switch (mType) {
         case MIXER:
         case OFFLOAD:
             break;
         case DIRECT:
+            if (mIsDirectPcm) {
+                // Allow effects when direct PCM enabled on Direct output
+                break;
+            }
         case DUPLICATING:
         case RECORD:
         default:
@@ -1357,7 +1364,13 @@ sp<AudioFlinger::EffectHandle> AudioFlinger::ThreadBase::createEffect_l(
             if (lStatus != NO_ERROR) {
                 goto Exit;
             }
-            effect->setOffloaded(mType == OFFLOAD, mId);
+
+            bool setVal = false;
+            if (mType == OFFLOAD || (mType == DIRECT && mIsDirectPcm)) {
+                setVal = true;
+            }
+
+            effect->setOffloaded(setVal, mId);
 
             lStatus = chain->addEffect_l(effect);
             if (lStatus != NO_ERROR) {
@@ -1443,7 +1456,13 @@ status_t AudioFlinger::ThreadBase::addEffect_l(const sp<EffectModule>& effect)
         return BAD_VALUE;
     }
 
-    effect->setOffloaded(mType == OFFLOAD, mId);
+    bool setval = false;
+
+    if ((mType == OFFLOAD) || (mType == DIRECT && mIsDirectPcm)) {
+        setval = true;
+    }
+
+    effect->setOffloaded(setval, mId);
 
     status_t status = chain->addEffect_l(effect);
     if (status != NO_ERROR) {
@@ -1573,6 +1592,7 @@ AudioFlinger::PlaybackThread::PlaybackThread(const sp<AudioFlinger>& audioFlinge
         mEffectBufferValid(false),
         mSuspended(0), mBytesWritten(0),
         mFramesWritten(0),
+        mSuspendedFrames(0),
         mActiveTracksGeneration(0),
         // mStreamTypes[] initialized in constructor body
         mOutput(output),
@@ -2301,18 +2321,7 @@ void AudioFlinger::PlaybackThread::readOutputParameters_l()
                 multiplier = (double) maxNormalFrameCount / (double) mFrameCount;
             }
         } else {
-            // prefer an even multiplier, for compatibility with doubling of fast tracks due to HAL
-            // SRC (it would be unusual for the normal sink buffer size to not be a multiple of fast
-            // track, but we sometimes have to do this to satisfy the maximum frame count
-            // constraint)
-            // FIXME this rounding up should not be done if no HAL SRC
-            uint32_t truncMult = (uint32_t) multiplier;
-            if ((truncMult & 1)) {
-                if ((truncMult + 1) * mFrameCount <= maxNormalFrameCount) {
-                    ++truncMult;
-                }
-            }
-            multiplier = (double) truncMult;
+            multiplier = floor(multiplier);
         }
     }
     mNormalFrameCount = multiplier * mFrameCount;
@@ -2915,7 +2924,8 @@ bool AudioFlinger::PlaybackThread::threadLoop()
 
                 // copy over kernel info
                 mTimestamp.mPosition[ExtendedTimestamp::LOCATION_KERNEL] =
-                        timestamp.mPosition[ExtendedTimestamp::LOCATION_KERNEL];
+                        timestamp.mPosition[ExtendedTimestamp::LOCATION_KERNEL]
+                        + mSuspendedFrames; // add frames discarded when suspended
                 mTimestamp.mTimeNs[ExtendedTimestamp::LOCATION_KERNEL] =
                         timestamp.mTimeNs[ExtendedTimestamp::LOCATION_KERNEL];
             }
@@ -3079,15 +3089,18 @@ bool AudioFlinger::PlaybackThread::threadLoop()
 
             mBytesRemaining = mCurrentWriteLength;
             if (isSuspended()) {
-                mSleepTimeUs = suspendSleepTimeUs();
-                // simulate write to HAL when suspended
-                mBytesWritten += mSinkBufferSize;
-                mFramesWritten += mSinkBufferSize / mFrameSize;
+                // Simulate write to HAL when suspended (e.g. BT SCO phone call).
+                mSleepTimeUs = suspendSleepTimeUs(); // assumes full buffer.
+                const size_t framesRemaining = mBytesRemaining / mFrameSize;
+                mBytesWritten += mBytesRemaining;
+                mFramesWritten += framesRemaining;
+                mSuspendedFrames += framesRemaining; // to adjust kernel HAL position
                 mBytesRemaining = 0;
             }
 
             // only process effects if we're going to write
-            if (mSleepTimeUs == 0 && mType != OFFLOAD) {
+            if (mSleepTimeUs == 0 && mType != OFFLOAD &&
+                !(mType == DIRECT && mIsDirectPcm)) {
                 for (size_t i = 0; i < effectChains.size(); i ++) {
                     effectChains[i]->process_l();
                 }
@@ -3097,7 +3110,7 @@ bool AudioFlinger::PlaybackThread::threadLoop()
         // was read from audio track: process only updates effect state
         // and thus does have to be synchronized with audio writes but may have
         // to be called while waiting for async write callback
-        if (mType == OFFLOAD) {
+        if ((mType == OFFLOAD) || (mType == DIRECT && mIsDirectPcm)) {
             for (size_t i = 0; i < effectChains.size(); i ++) {
                 effectChains[i]->process_l();
             }
@@ -5062,6 +5075,8 @@ void AudioFlinger::DirectOutputThread::cacheParameters_l()
         mStandbyDelayNs = 0;
     } else if ((mType == OFFLOAD) && !audio_has_proportional_frames(mFormat)) {
         mStandbyDelayNs = kOffloadStandbyDelayNs;
+    } else if (mType == DIRECT && mIsDirectPcm) {
+        mStandbyDelayNs = kOffloadStandbyDelayNs;
     } else {
         mStandbyDelayNs = microseconds(mActiveSleepTimeUs*2);
     }
@@ -5180,7 +5195,8 @@ void AudioFlinger::AsyncCallbackThread::resetDraining()
 AudioFlinger::OffloadThread::OffloadThread(const sp<AudioFlinger>& audioFlinger,
         AudioStreamOut* output, audio_io_handle_t id, uint32_t device, bool systemReady)
     :   DirectOutputThread(audioFlinger, output, id, device, OFFLOAD, systemReady),
-        mPausedWriteLength(0), mPausedBytesRemaining(0), mKeepWakeLock(true)
+        mPausedWriteLength(0), mPausedBytesRemaining(0), mKeepWakeLock(true),
+        mOffloadUnderrunPosition(~0LL)
 {
     //FIXME: mStandby should be set to true by ThreadBase constructor
     mStandby = true;
@@ -5236,15 +5252,9 @@ AudioFlinger::PlaybackThread::mixer_state AudioFlinger::OffloadThread::prepareTr
         if (track->isInvalid()) {
             ALOGW("An invalidated track shouldn't be in active list");
             tracksToRemove->add(track);
-            continue;
-        }
-
-        if (track->mState == TrackBase::IDLE) {
+        } else if (track->mState == TrackBase::IDLE) {
             ALOGW("An idle track shouldn't be in active list");
-            continue;
-        }
-
-        if (track->isPausing()) {
+        } else if (track->isPausing()) {
             track->setPaused();
             if (last) {
                 if (mHwSupportsPause && !mHwPaused) {
@@ -5272,7 +5282,7 @@ AudioFlinger::PlaybackThread::mixer_state AudioFlinger::OffloadThread::prepareTr
             if (last) {
                 mFlushPending = true;
             }
-        } else if (track->isResumePending()){
+        } else if (track->isResumePending()) {
             track->resumeAck();
             if (last) {
                 if (mPausedBytesRemaining) {
@@ -5386,12 +5396,30 @@ AudioFlinger::PlaybackThread::mixer_state AudioFlinger::OffloadThread::prepareTr
                 // No buffers for this track. Give it a few chances to
                 // fill a buffer, then remove it from active list.
                 if (--(track->mRetryCount) <= 0) {
-                    ALOGV("OffloadThread: BUFFER TIMEOUT: remove(%d) from active list",
-                          track->name());
-                    tracksToRemove->add(track);
-                    // indicate to client process that the track was disabled because of underrun;
-                    // it will then automatically call start() when data is available
-                    track->disable();
+                    bool running = false;
+                    if (mOutput->stream->get_presentation_position != nullptr) {
+                        uint64_t position = 0;
+                        struct timespec unused;
+                        // The running check restarts the retry counter at least once.
+                        int ret = mOutput->stream->get_presentation_position(
+                                mOutput->stream, &position, &unused);
+                        if (ret == NO_ERROR && position != mOffloadUnderrunPosition) {
+                            running = true;
+                            mOffloadUnderrunPosition = position;
+                        }
+                        ALOGVV("underrun counter, running(%d): %lld vs %lld", running,
+                                (long long)position, (long long)mOffloadUnderrunPosition);
+                    }
+                    if (running) { // still running, give us more time.
+                        track->mRetryCount = kMaxTrackRetriesOffload;
+                    } else {
+                        ALOGV("OffloadThread: BUFFER TIMEOUT: remove(%d) from active list",
+                                track->name());
+                        tracksToRemove->add(track);
+                        // indicate to client process that the track was disabled because of underrun;
+                        // it will then automatically call start() when data is available
+                        track->disable();
+                    }
                 } else if (last){
                     mixerStatus = MIXER_TRACKS_ENABLED;
                 }
@@ -5448,6 +5476,7 @@ void AudioFlinger::OffloadThread::flushHw_l()
     mPausedBytesRemaining = 0;
     // reset bytes written count to reflect that DSP buffers are empty after flush.
     mBytesWritten = 0;
+    mOffloadUnderrunPosition = ~0LL;
 
     if (mUseAsyncWrite) {
         // discard any pending drain or write ack by incrementing sequence

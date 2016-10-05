@@ -36,6 +36,8 @@
 #include <utils/String8.h>
 #include <cutils/properties.h>
 
+#include <stagefright/AVExtensions.h>
+
 #if LOG_NDEBUG
 #define UNUSED_UNLESS_VERBOSE(x) (void)(x)
 #else
@@ -111,6 +113,11 @@ void CameraSourceListener::postRecordingFrameHandleTimestamp(nsecs_t timestamp,
 }
 
 static int32_t getColorFormat(const char* colorFormat) {
+    if (!colorFormat) {
+        ALOGE("Invalid color format");
+        return -1;
+    }
+
     if (!strcmp(colorFormat, CameraParameters::PIXEL_FORMAT_YUV420P)) {
        return OMX_COLOR_FormatYUV420Planar;
     }
@@ -120,7 +127,12 @@ static int32_t getColorFormat(const char* colorFormat) {
     }
 
     if (!strcmp(colorFormat, CameraParameters::PIXEL_FORMAT_YUV420SP)) {
+#ifdef USE_SAMSUNG_COLORFORMAT
+        static const int OMX_SEC_COLOR_FormatNV12LPhysicalAddress = 0x7F000002;
+        return OMX_SEC_COLOR_FormatNV12LPhysicalAddress;
+#else
         return OMX_COLOR_FormatYUV420SemiPlanar;
+#endif
     }
 
     if (!strcmp(colorFormat, CameraParameters::PIXEL_FORMAT_YUV422I)) {
@@ -360,7 +372,7 @@ status_t CameraSource::configureCamera(
     }
 
     if (frameRate != -1) {
-        CHECK(frameRate > 0 && frameRate <= 120);
+        CHECK(frameRate > 0 && frameRate <= 240);
         const char* supportedFrameRates =
                 params->get(CameraParameters::KEY_SUPPORTED_PREVIEW_FRAME_RATES);
         CHECK(supportedFrameRates != NULL);
@@ -687,6 +699,8 @@ status_t CameraSource::initWithCameraAccess(
     mMeta->setInt32(kKeyStride,      mVideoSize.width);
     mMeta->setInt32(kKeySliceHeight, mVideoSize.height);
     mMeta->setInt32(kKeyFrameRate,   mVideoFrameRate);
+    AVUtils::get()->extractCustomCameraKeys(params, mMeta);
+
     return OK;
 }
 
@@ -1127,6 +1141,9 @@ void CameraSource::releaseRecordingFrameHandle(native_handle_t* handle) {
         int64_t token = IPCThreadState::self()->clearCallingIdentity();
         mCamera->releaseRecordingFrameHandle(handle);
         IPCThreadState::self()->restoreCallingIdentity(token);
+    } else {
+        native_handle_close(handle);
+        native_handle_delete(handle);
     }
 }
 

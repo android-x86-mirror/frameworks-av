@@ -89,7 +89,7 @@ public:
         SeekMode mSeekMode;
         int64_t mLatenessUs;
         bool mNonBlocking;
-    };
+    } __attribute__((packed)); // sent through Binder
 
     // Returns a new buffer of data. Call blocks until a
     // buffer is available, an error is encountered or the end of the stream
@@ -113,6 +113,9 @@ public:
     // but should be prepared for buffers of the new configuration.
     virtual status_t readMultiple(
             Vector<MediaBuffer *> *buffers, uint32_t maxNumBuffers = 1) = 0;
+
+    // Returns true if readMultiple is supported, otherwise false.
+    virtual bool canReadMultiple() = 0;
 
     // Causes this source to suspend pulling data from its upstream source
     // until a subsequent read-with-seek. Currently only supported by
@@ -147,6 +150,10 @@ public:
     virtual status_t readMultiple(
             Vector<MediaBuffer *> * /* buffers */, uint32_t /* maxNumBuffers = 1 */) {
         return ERROR_UNSUPPORTED;
+    }
+
+    virtual bool canReadMultiple() {
+        return true;
     }
 protected:
     virtual ~BnMediaSource();

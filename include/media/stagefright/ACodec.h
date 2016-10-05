@@ -30,6 +30,8 @@
 #include <utils/NativeHandle.h>
 #include <OMX_Audio.h>
 
+#include <system/audio.h>
+
 #define TRACK_BUFFER_TIMING     0
 
 namespace android {
@@ -114,8 +116,11 @@ struct ACodec : public AHierarchicalStateMachine, public CodecBase {
 
 protected:
     virtual ~ACodec();
+    virtual status_t setupCustomCodec(
+            status_t err, const char *mime, const sp<AMessage> &msg);
+    virtual status_t GetVideoCodingTypeFromMime(
+            const char *mime, OMX_VIDEO_CODINGTYPE *codingType);
 
-private:
     struct BaseState;
     struct UninitializedState;
     struct LoadedState;
@@ -324,6 +329,9 @@ private:
     status_t submitOutputMetadataBuffer();
     void signalSubmitOutputMetadataBufferIfEOS_workaround();
     status_t allocateOutputBuffersFromNativeWindow();
+#ifdef USE_SAMSUNG_COLORFORMAT
+    void setNativeWindowColorFormat(OMX_COLOR_FORMATTYPE &eNativeColorFormat);
+#endif
     status_t cancelBufferToNativeWindow(BufferInfo *info);
     status_t freeOutputBuffersNotOwnedByComponent();
     BufferInfo *dequeueBufferFromNativeWindow();
@@ -340,12 +348,11 @@ private:
             uint32_t portIndex, IOMX::buffer_id bufferID,
             ssize_t *index = NULL);
 
-    status_t setComponentRole(bool isEncoder, const char *mime);
-    static const char *getComponentRole(bool isEncoder, const char *mime);
+    virtual status_t setComponentRole(bool isEncoder, const char *mime);
+    virtual const char *getComponentRole(bool isEncoder, const char *mime);
     static status_t setComponentRole(
             const sp<IOMX> &omx, IOMX::node_id node, const char *role);
-
-    status_t configureCodec(const char *mime, const sp<AMessage> &msg);
+    virtual status_t configureCodec(const char *mime, const sp<AMessage> &msg);
 
     status_t configureTunneledVideoPlayback(int32_t audioHwSync,
             const sp<ANativeWindow> &nativeWindow);
@@ -358,11 +365,11 @@ private:
 
     status_t setSupportedOutputFormat(bool getLegacyFlexibleFormat);
 
-    status_t setupVideoDecoder(
+    virtual status_t setupVideoDecoder(
             const char *mime, const sp<AMessage> &msg, bool usingNativeBuffers, bool haveSwRenderer,
             sp<AMessage> &outputformat);
 
-    status_t setupVideoEncoder(
+    virtual status_t setupVideoEncoder(
             const char *mime, const sp<AMessage> &msg,
             sp<AMessage> &outputformat, sp<AMessage> &inputformat);
 
@@ -456,11 +463,14 @@ private:
             int32_t numChannels, int32_t sampleRate, int32_t bitRate,
             int32_t aacProfile, bool isADTS, int32_t sbrMode,
             int32_t maxOutputChannelCount, const drcParams_t& drc,
-            int32_t pcmLimiterEnable);
+            int32_t pcmLimiterEnable,
+            AudioEncoding encoding = kAudioEncodingPcm16bit);
 
-    status_t setupAC3Codec(bool encoder, int32_t numChannels, int32_t sampleRate);
+    status_t setupAC3Codec(bool encoder, int32_t numChannels, int32_t sampleRate,
+            AudioEncoding encoding = kAudioEncodingPcm16bit);
 
-    status_t setupEAC3Codec(bool encoder, int32_t numChannels, int32_t sampleRate);
+    status_t setupEAC3Codec(bool encoder, int32_t numChannels, int32_t sampleRate,
+            AudioEncoding encoding = kAudioEncodingPcm16bit);
 
     status_t selectAudioPortFormat(
             OMX_U32 portIndex, OMX_AUDIO_CODINGTYPE desiredFormat);
@@ -479,6 +489,9 @@ private:
     status_t setOperatingRate(float rateFloat, bool isVideo);
     status_t getIntraRefreshPeriod(uint32_t *intraRefreshPeriod);
     status_t setIntraRefreshPeriod(uint32_t intraRefreshPeriod, bool inConfigure);
+    status_t configureTemporalLayers(
+            uint32_t numLayers, uint32_t numBLayers, bool inConfigure,
+            sp<AMessage> &outputFormat);
 
     status_t setMinBufferSize(OMX_U32 portIndex, size_t size);
 
@@ -493,7 +506,7 @@ private:
     status_t configureBitrate(
             int32_t bitrate, OMX_VIDEO_CONTROLRATETYPE bitrateMode);
 
-    status_t setupErrorCorrectionParameters();
+    virtual status_t setupErrorCorrectionParameters();
 
     status_t initNativeWindow();
 
@@ -535,7 +548,7 @@ private:
     void addKeyFormatChangesToRenderBufferNotification(sp<AMessage> &notify);
     void sendFormatChange();
 
-    status_t getPortFormat(OMX_U32 portIndex, sp<AMessage> &notify);
+    virtual status_t getPortFormat(OMX_U32 portIndex, sp<AMessage> &notify);
 
     void signalError(
             OMX_ERRORTYPE error = OMX_ErrorUndefined,
@@ -547,10 +560,22 @@ private:
         DescribeColorFormat2Params &describeParams);
 
     status_t requestIDRFrame();
-    status_t setParameters(const sp<AMessage> &params);
+    virtual status_t setParameters(const sp<AMessage> &params);
 
     // Send EOS on input stream.
     void onSignalEndOfInputStream();
+
+    static const int32_t kNumBFramesPerPFrame = 1;
+
+    virtual void setBFrames(OMX_VIDEO_PARAM_MPEG4TYPE *mpeg4type);
+    virtual void setBFrames(OMX_VIDEO_PARAM_AVCTYPE *h264type,
+        const int32_t iFramesInterval, const int32_t frameRate);
+
+    virtual status_t getVQZIPInfo(const sp<AMessage> &msg) {
+        return OK;
+    }
+
+    sp<IOMXObserver> createObserver();
 
     DISALLOW_EVIL_CONSTRUCTORS(ACodec);
 };

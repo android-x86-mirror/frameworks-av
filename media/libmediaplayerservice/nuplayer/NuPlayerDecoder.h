@@ -49,8 +49,8 @@ protected:
     virtual void onFlush();
     virtual void onShutdown(bool notifyComplete);
     virtual bool doRequestBuffers();
+    virtual void setPcmFormat(const sp<AMessage> & /*format*/) {}
 
-private:
     enum {
         kWhatCodecNotify         = 'cdcN',
         kWhatRenderBuffer        = 'rndr',
@@ -90,6 +90,8 @@ private:
     bool mIsSecure;
     bool mFormatChangePending;
     bool mTimeChangePending;
+    float mPlaybackSpeed;
+    int32_t mVideoTemporalLayerCount;
 
     bool mResumePending;
     AString mComponentName;
@@ -102,7 +104,7 @@ private:
             size_t size,
             int64_t timeUs,
             int32_t flags);
-    void handleOutputFormatChange(const sp<AMessage> &format);
+    virtual void handleOutputFormatChange(const sp<AMessage> &format);
 
     void releaseAndResetMediaBuffers();
     void requestCodecNotification();

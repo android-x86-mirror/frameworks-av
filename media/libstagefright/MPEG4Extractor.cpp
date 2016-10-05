@@ -44,6 +44,7 @@
 
 #include <byteswap.h>
 #include "include/ID3.h"
+#include "include/avc_utils.h"
 
 #ifndef UINT32_MAX
 #define UINT32_MAX       (4294967295U)
@@ -320,6 +321,9 @@ static const char *FourCC2MIME(uint32_t fourcc) {
     switch (fourcc) {
         case FOURCC('m', 'p', '4', 'a'):
             return MEDIA_MIMETYPE_AUDIO_AAC;
+
+        case FOURCC('.', 'm', 'p', '3'):
+            return MEDIA_MIMETYPE_AUDIO_MPEG;
 
         case FOURCC('s', 'a', 'm', 'r'):
             return MEDIA_MIMETYPE_AUDIO_AMR_NB;
@@ -1401,7 +1405,14 @@ status_t MPEG4Extractor::parseChunk(off64_t *offset, int depth) {
             mLastTrack->meta->setInt32(kKeySampleRate, sample_rate);
 
             off64_t stop_offset = *offset + chunk_size;
-            *offset = data_offset + sizeof(buffer);
+            if (!strcasecmp(MEDIA_MIMETYPE_AUDIO_MPEG, FourCC2MIME(chunk_type)) ||
+                !strcasecmp(MEDIA_MIMETYPE_AUDIO_AMR_WB, FourCC2MIME(chunk_type))) {
+                // ESD is not required in mp3
+                // amr wb with damr atom corrupted can cause the clip to not play
+               *offset = stop_offset;
+            } else {
+               *offset = data_offset + sizeof(buffer);
+            }
             while (*offset < stop_offset) {
                 status_t err = parseChunk(offset, depth + 1);
                 if (err != OK) {
@@ -2471,6 +2482,15 @@ status_t MPEG4Extractor::parseQTMetaVal(
         if (!strcasecmp(mMetaKeyMap[index].c_str(), "com.android.capture.fps")) {
             mFileMetaData->setFloat(kKeyCaptureFramerate, *(float *)&val);
         }
+    } else if (dataType == 67 && dataSize >= 4) {
+        // BE signed int32
+        uint32_t val;
+        if (!mDataSource->getUInt32(offset, &val)) {
+            return ERROR_MALFORMED;
+        }
+        if (!strcasecmp(mMetaKeyMap[index].c_str(), "com.android.video.temporal_layers_count")) {
+            mFileMetaData->setInt32(kKeyTemporalLayerCount, val);
+        }
     } else {
         // add more keys if needed
         ALOGV("ignoring key: type %d, size %d", dataType, dataSize);
@@ -3173,12 +3193,12 @@ status_t MPEG4Extractor::updateAudioTrackInfoFromESDS_MPEG4Audio(
         return OK;
     }
 
-    if (objectTypeIndication  == 0x6b) {
-        // The media subtype is MP3 audio
-        // Our software MP3 audio decoder may not be able to handle
-        // packetized MP3 audio; for now, lets just return ERROR_UNSUPPORTED
-        ALOGE("MP3 track in MP4/3GPP file is not supported");
-        return ERROR_UNSUPPORTED;
+    if (objectTypeIndication  == 0x6b
+         || objectTypeIndication  == 0x69) {
+         // This is mpeg1/2 audio content, set mimetype to mpeg
+         mLastTrack->meta->setCString(kKeyMIMEType, MEDIA_MIMETYPE_AUDIO_MPEG);
+         ALOGD("objectTypeIndication:0x%x, set mimetype to mpeg ",objectTypeIndication);
+         return OK;
     }
 
     const uint8_t *csd;
@@ -4464,6 +4484,12 @@ status_t MPEG4Source::read(
                     kKeyTargetTime, targetSampleTimeUs);
         }
 
+        if (mIsAVC) {
+            uint32_t layerId = FindAVCLayerId(
+                    (const uint8_t *)mBuffer->data(), mBuffer->range_length());
+            mBuffer->meta_data()->setInt32(kKeyTemporalLayerId, layerId);
+        }
+
         if (isSyncSample) {
             mBuffer->meta_data()->setInt32(kKeyIsSyncFrame, 1);
         }
@@ -4625,6 +4651,12 @@ status_t MPEG4Source::fragmentedRead(
             if (targetSampleTimeUs >= 0) {
                 mBuffer->meta_data()->setInt64(
                         kKeyTargetTime, targetSampleTimeUs);
+            }
+
+            if (mIsAVC) {
+                uint32_t layerId = FindAVCLayerId(
+                        (const uint8_t *)mBuffer->data(), mBuffer->range_length());
+                mBuffer->meta_data()->setInt32(kKeyTemporalLayerId, layerId);
             }
 
             if (isSyncSample) {
@@ -4824,7 +4856,9 @@ static bool LegacySniffMPEG4(
         return false;
     }
 
-    if (!memcmp(header, "ftyp3gp", 7) || !memcmp(header, "ftypmp42", 8)
+    if (!memcmp(header, "ftyp3g2a", 8) || !memcmp(header, "ftyp3g2b", 8)
+        || !memcmp(header, "ftyp3g2c", 8)
+        || !memcmp(header, "ftyp3gp", 7) || !memcmp(header, "ftypmp42", 8)
         || !memcmp(header, "ftyp3gr6", 8) || !memcmp(header, "ftyp3gs6", 8)
         || !memcmp(header, "ftyp3ge6", 8) || !memcmp(header, "ftyp3gg6", 8)
         || !memcmp(header, "ftypisom", 8) || !memcmp(header, "ftypM4V ", 8)

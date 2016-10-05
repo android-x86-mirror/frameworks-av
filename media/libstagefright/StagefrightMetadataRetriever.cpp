@@ -28,6 +28,8 @@
 #include <media/ICrypto.h>
 #include <media/IMediaHTTPService.h>
 
+#include <media/stagefright/FFMPEGSoftCodec.h>
+
 #include <media/stagefright/foundation/ABuffer.h>
 #include <media/stagefright/foundation/ADebug.h>
 #include <media/stagefright/foundation/AMessage.h>
@@ -45,6 +47,8 @@
 #include <media/stagefright/Utils.h>
 
 #include <CharacterEncodingDetector.h>
+
+#include <stagefright/AVExtensions.h>
 
 namespace android {
 
@@ -100,6 +104,7 @@ status_t StagefrightMetadataRetriever::setDataSource(
     fd = dup(fd);
 
     ALOGV("setDataSource(%d, %" PRId64 ", %" PRId64 ")", fd, offset, length);
+    AVUtils::get()->printFileName(fd);
 
     clearMetadata();
     mSource = new FileSource(fd, offset, length);
@@ -157,6 +162,8 @@ static VideoFrame *extractVideoFrame(
 
     // TODO: Use Flexible color instead
     videoFormat->setInt32("color-format", OMX_COLOR_FormatYUV420Planar);
+
+    videoFormat->setInt32("thumbnail-mode", 1);
 
     status_t err;
     sp<ALooper> looper = new ALooper;
@@ -365,9 +372,11 @@ static VideoFrame *extractVideoFrame(
         }
     }
 
-    int32_t width, height;
+    int32_t width, height, stride, slice_height;
     CHECK(outputFormat->findInt32("width", &width));
     CHECK(outputFormat->findInt32("height", &height));
+    CHECK(outputFormat->findInt32("stride", &stride));
+    CHECK(outputFormat->findInt32("slice-height", &slice_height));
 
     int32_t crop_left, crop_top, crop_right, crop_bottom;
     if (!outputFormat->findRect("crop", &crop_left, &crop_top, &crop_right, &crop_bottom)) {
@@ -405,7 +414,7 @@ static VideoFrame *extractVideoFrame(
     if (converter.isValid()) {
         err = converter.convert(
                 (const uint8_t *)videoFrameBuffer->data(),
-                width, height,
+                stride, slice_height,
                 crop_left, crop_top, crop_right, crop_bottom,
                 frame->mData,
                 frame->mWidth,
@@ -498,11 +507,21 @@ VideoFrame *StagefrightMetadataRetriever::getFrameAtTime(
     MediaCodecList::findMatchingCodecs(
             mime,
             false, /* encoder */
-            MediaCodecList::kPreferSoftwareCodecs,
+            0 /* MediaCodecList::kPreferSoftwareCodecs */,
             &matchingCodecs);
 
     for (size_t i = 0; i < matchingCodecs.size(); ++i) {
-        const AString &componentName = matchingCodecs[i];
+        AString componentName;
+        const char* ffmpegComponentName =
+            FFMPEGSoftCodec::overrideComponentName(0, trackMeta, mime, false);
+        if (ffmpegComponentName != NULL) {
+            ALOGV("override compoent %s to %s for video frame extraction.",
+                    matchingCodecs[i].c_str(), ffmpegComponentName);
+            componentName.setTo(ffmpegComponentName);
+        } else {
+            componentName = matchingCodecs[i];
+        }
+
         VideoFrame *frame =
             extractVideoFrame(componentName, trackMeta, source, timeUs, option);
 

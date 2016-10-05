@@ -31,6 +31,12 @@ LOCAL_C_INCLUDES := \
 
 LOCAL_MULTILIB := $(AUDIOSERVER_MULTILIB)
 
+ifeq ($(call is-vendor-board-platform,QCOM),true)
+ifneq ($(strip $(AUDIO_FEATURE_ENABLED_PROXY_DEVICE)),false)
+LOCAL_CFLAGS += -DAUDIO_EXTN_AFE_PROXY_ENABLED
+endif
+endif
+
 LOCAL_MODULE := libaudiopolicyenginedefault
 LOCAL_MODULE_TAGS := optional
 
