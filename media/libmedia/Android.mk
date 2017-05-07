@@ -98,6 +98,7 @@ LOCAL_C_INCLUDES := \
     $(call include-path-for, audio-utils)
 
 LOCAL_CFLAGS += -Werror -Wno-error=deprecated-declarations -Wall
+LOCAL_CFLAGS += $(if $(CM_BUILD),-DCM_BUILD)
 LOCAL_CLANG := true
 LOCAL_SANITIZE := unsigned-integer-overflow signed-integer-overflow
 
