@@ -36,7 +36,7 @@ struct CodecBase;
 struct IBatteryStats;
 struct ICrypto;
 class IMemory;
-struct MemoryDealer;
+class MemoryDealer;
 class IResourceManagerClient;
 class IResourceManagerService;
 struct PersistentSurface;

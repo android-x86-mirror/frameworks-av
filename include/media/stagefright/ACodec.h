@@ -56,7 +56,7 @@
 namespace android {
 
 struct ABuffer;
-struct MemoryDealer;
+class MemoryDealer;
 struct DescribeColorFormat2Params;
 struct DataConverter;
 
