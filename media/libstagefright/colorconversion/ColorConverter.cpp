@@ -226,8 +226,8 @@ status_t ColorConverter::convertYUV420PlanarUseLibYUV(
         src_u + (src.mWidth / 2) * (src.mHeight / 2);
 
 
-    libyuv::I420ToRGB565(src_y, src.mWidth, src_u, src.mWidth / 2, src_v, src.mWidth / 2,
-            (uint8 *)dst_ptr, dst.mWidth * 2, dst.mWidth, dst.mHeight);
+    libyuv::I420ToRGB565Dither(src_y, src.mWidth, src_u, src.mWidth / 2, src_v, src.mWidth / 2,
+            (uint8 *)dst_ptr, dst.mWidth * 2, NULL, dst.mWidth, dst.mHeight);
 
     return OK;
 }
