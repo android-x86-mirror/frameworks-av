@@ -2041,7 +2041,7 @@ void MediaCodec::onMessageReceived(const sp<AMessage> &msg) {
                     }
 
                     const char *owner = mCodecInfo->getOwnerName();
-                    if (mComponentName.startsWith("OMX.google.")
+                    if ((mComponentName.startsWith("OMX.google.") || mComponentName.startsWith("OMX.ffmpeg."))
                             && (owner == nullptr || strncmp(owner, "default", 8) == 0)) {
                         mFlags |= kFlagUsesSoftwareRenderer;
                     } else {

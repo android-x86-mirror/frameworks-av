@@ -46,11 +46,16 @@ public:
         return mName;
     }
 
+    virtual String8 getUri() {
+        return mUri;
+    }
+
 protected:
     virtual ~ClearFileSource();
     virtual ssize_t readAt_l(off64_t offset, void *data, size_t size);
 
     int mFd;
+    String8 mUri;
     int64_t mOffset;
     int64_t mLength;
     Mutex mLock;
@@ -60,6 +65,8 @@ private:
 
     ClearFileSource(const ClearFileSource &);
     ClearFileSource &operator=(const ClearFileSource &);
+
+    void fetchUriFromFd(int fd);
 };
 
 }  // namespace android

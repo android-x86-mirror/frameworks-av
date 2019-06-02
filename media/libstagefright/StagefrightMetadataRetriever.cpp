@@ -29,6 +29,7 @@
 #include <media/stagefright/foundation/ADebug.h>
 #include <media/stagefright/foundation/AMessage.h>
 #include <media/stagefright/DataSourceFactory.h>
+#include <media/stagefright/FFMPEGSoftCodec.h>
 #include <media/stagefright/FileSource.h>
 #include <media/stagefright/MediaCodecList.h>
 #include <media/stagefright/MediaDefs.h>
@@ -348,7 +349,16 @@ status_t StagefrightMetadataRetriever::getFrameInternal(
             &matchingCodecs);
 
     for (size_t i = 0; i < matchingCodecs.size(); ++i) {
-        const AString &componentName = matchingCodecs[i];
+        AString componentName = matchingCodecs[i];
+        const char* ffmpegComponentName =
+            FFMPEGSoftCodec::overrideComponentName(0, trackMeta, mime, false);
+        if (ffmpegComponentName != NULL) {
+            ALOGV("override compoent %s to %s for video frame extraction.",
+                    matchingCodecs[i].c_str(), ffmpegComponentName);
+            componentName.setTo(ffmpegComponentName);
+        } else {
+            componentName = matchingCodecs[i];
+        }
         sp<VideoFrameDecoder> decoder = new VideoFrameDecoder(componentName, trackMeta, source);
         if (decoder->init(timeUs, numFrames, option, colorFormat) == OK) {
             if (outFrame != NULL) {

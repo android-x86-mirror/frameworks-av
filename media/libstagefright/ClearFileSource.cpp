@@ -31,6 +31,7 @@ namespace android {
 
 ClearFileSource::ClearFileSource(const char *filename)
     : mFd(-1),
+      mUri(filename),
       mOffset(0),
       mLength(-1),
       mName("<null>") {
@@ -87,6 +88,7 @@ ClearFileSource::ClearFileSource(int fd, int64_t offset, int64_t length)
             (long long) mOffset,
             (long long) mLength);
 
+    fetchUriFromFd(fd);
 }
 
 ClearFileSource::~ClearFileSource() {
@@ -138,6 +140,20 @@ status_t ClearFileSource::getSize(off64_t *size) {
     *size = mLength;
 
     return OK;
+}
+
+void ClearFileSource::fetchUriFromFd(int fd) {
+    ssize_t len = 0;
+    char path[PATH_MAX] = {0};
+    char link[PATH_MAX] = {0};
+
+    mUri.clear();
+
+    snprintf(path, PATH_MAX, "/proc/%d/fd/%d", getpid(), fd);
+    if ((len = readlink(path, link, sizeof(link)-1)) != -1) {
+        link[len] = '\0';
+        mUri.setTo(link);
+    }
 }
 
 }  // namespace android
