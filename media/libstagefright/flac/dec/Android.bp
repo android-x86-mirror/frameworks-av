@@ -15,7 +15,6 @@ cc_library {
             "signed-integer-overflow",
             "unsigned-integer-overflow",
         ],
-        cfi: true,
     },
 
     static: {
