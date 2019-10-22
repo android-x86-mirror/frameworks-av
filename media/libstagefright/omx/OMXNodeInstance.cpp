@@ -941,6 +941,13 @@ status_t OMXNodeInstance::useGraphicBuffer(
         return BAD_VALUE;
     }
     Mutex::Autolock autoLock(mLock);
+    if (!mGraphicBufferEnabled[portIndex]
+            || mMetadataType[portIndex] != kMetadataBufferTypeInvalid) {
+        // Report error if this is not in graphic buffer mode.
+        ALOGE("b/62948670");
+        android_errorWriteLog(0x534e4554, "62948670");
+        return INVALID_OPERATION;
+    }
 
     if (!mGraphicBufferEnabled[portIndex]
             || mMetadataType[portIndex] != kMetadataBufferTypeInvalid) {

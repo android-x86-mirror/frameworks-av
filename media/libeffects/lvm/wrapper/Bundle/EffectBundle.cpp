@@ -2545,7 +2545,7 @@ int Equalizer_getParameter(EffectContext *pContext,
     } break;
 
     case EQ_PARAM_PROPERTIES: {
-        constexpr uint32_t requiredValueSize = (2 + FIVEBAND_NUMBANDS) * sizeof(uint16_t);
+        const uint32_t requiredValueSize = (2 + FIVEBAND_NUMBANDS) * sizeof(uint16_t);
         if (*pValueSize < requiredValueSize) {
             ALOGV("%s EQ_PARAM_PROPERTIES invalid *pValueSize %u", __func__, *pValueSize);
             status = -EINVAL;
@@ -2661,7 +2661,7 @@ int Equalizer_setParameter(EffectContext *pContext,
         if (p[0] >= 0) {
             EqualizerSetPreset(pContext, (int)p[0]);
         } else {
-            constexpr uint32_t valueSizeRequired = (2 + FIVEBAND_NUMBANDS) * sizeof(int16_t);
+            const uint32_t valueSizeRequired = (2 + FIVEBAND_NUMBANDS) * sizeof(int16_t);
             if (valueSize < valueSizeRequired) {
               android_errorWriteLog(0x534e4554, "37563371");
               ALOGE("%s EQ_PARAM_PROPERTIES invalid valueSize %u < %u",
